@@ -1,0 +1,26 @@
+[Unit]
+Description=Native Chrome noVNC visual browser service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+Environment=APP_DIR=__APP_DIR__
+Environment=DISPLAY_NUM=99
+Environment=WIDTH=1280
+Environment=HEIGHT=720
+Environment=VNC_PORT=5900
+Environment=NOVNC_PORT=6080
+Environment=START_URL=about:blank
+ExecStart=__APP_DIR__/start-chrome-novnc.sh
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
