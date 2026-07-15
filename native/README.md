@@ -33,6 +33,44 @@ Google Chrome
   -> client browser opens http://TARGET_IP:6080/vnc.html
 ```
 
+## Why this does not use the jessfraz X11 socket pattern
+
+Jessie Frazelle's `jessfraz/dockerfiles` Chrome image is useful prior art for Chrome dependency choices, non-root execution, `/dev/shm` awareness, and browser sandbox/security thinking.
+
+That pattern is **not** the runtime model here because it assumes a host that already has a graphical X11 session. The classic container invocation mounts the host X11 socket and forwards `DISPLAY`, for example:
+
+```text
+-v /tmp/.X11-unix:/tmp/.X11-unix
+-e DISPLAY=unix$DISPLAY
+```
+
+This native deployment targets a different environment:
+
+```text
+offline Ubuntu 24.04 command-line target
+no Docker
+no existing desktop session
+remote visual access from another machine's browser
+```
+
+Because there is no existing host X server to reuse, this implementation creates its own virtual display using Xvfb and then exposes it through x11vnc + noVNC.
+
+## Package profiles
+
+`build-offline-bundle.sh` supports two dependency profiles:
+
+```bash
+# Default: broader desktop/media/font compatibility profile
+./scripts/build-offline-bundle.sh
+
+# Smaller bundle for basic startup tests
+PACKAGE_PROFILE=minimal ./scripts/build-offline-bundle.sh
+```
+
+`desktop` is the default. It includes the core runtime plus additional font, GTK, Mesa, audio, media, and desktop integration packages inspired by long-lived containerized Chrome setups. Every package candidate is validated against the Ubuntu 24.04 apt index before being included, and unavailable candidates are written to `skipped-packages.txt`.
+
+Use `minimal` only when bundle size matters more than compatibility. For real field use, prefer the default `desktop` profile.
+
 ## Files
 
 ```text
@@ -64,6 +102,7 @@ native/offline-bundle/
 ├── repo/
 │   ├── *.deb
 │   └── Packages.gz
+├── root-package-list.txt
 ├── package-list.txt
 ├── skipped-packages.txt
 └── chrome-novnc-offline-noble-amd64.tar.gz
@@ -118,7 +157,19 @@ Run this on the target machine after install:
 ~/chrome-novnc/preflight.sh
 ```
 
-It checks OS, architecture, required commands, port usage, service status, and the Chrome sandbox precondition.
+It checks:
+
+- OS codename and CPU architecture.
+- Required commands.
+- noVNC web root.
+- VNC password file.
+- systemd unit status.
+- listening ports.
+- Xvfb process state.
+- `/dev/shm` size.
+- CJK font lookup.
+- Chrome sandbox binary and user namespace preconditions.
+- Non-root execution.
 
 ## Security notes
 
@@ -145,6 +196,14 @@ journalctl -u chrome-novnc -n 200 --no-pager
 cat ~/chrome-novnc/logs/*.log
 ```
 
+Also check shared memory:
+
+```bash
+df -h /dev/shm
+```
+
+If `/dev/shm` is very small, Chrome can crash or render blank tabs on heavier pages.
+
 ### Port 6080 is already used
 
 Set a different port in the systemd unit:
@@ -167,9 +226,30 @@ Check:
 ```bash
 google-chrome --version
 sysctl kernel.unprivileged_userns_clone 2>/dev/null || true
+ls -l /opt/google/chrome/chrome-sandbox
 cat ~/chrome-novnc/logs/chrome.log
 ```
 
 ### Chinese characters render as boxes
 
-Make sure `fonts-noto-cjk` was installed from the offline bundle.
+Make sure `fonts-noto-cjk` was installed from the offline bundle. Then check:
+
+```bash
+fc-match "Noto Sans CJK"
+```
+
+### The offline install reports missing packages
+
+Build the bundle again on a cleaner Ubuntu 24.04 amd64 environment, preferably a fresh VM or container, using the default `desktop` profile:
+
+```bash
+./scripts/build-offline-bundle.sh
+```
+
+Review:
+
+```bash
+cat native/offline-bundle/skipped-packages.txt
+```
+
+If a skipped package is not available on Ubuntu 24.04, remove it from the optional desktop package list or replace it with the correct Noble package name.
